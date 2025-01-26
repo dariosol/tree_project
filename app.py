@@ -19,6 +19,7 @@ geolocator = Nominatim(user_agent="tree_locator")
 # Define the Tree model
 class Tree(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    custom_id = db.Column(db.String(100), unique=True)  # Custom ID field, unique
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
     address = db.Column(db.Text)
@@ -60,6 +61,7 @@ def get_trees():
     return jsonify([
         {
             'id': tree.id,
+            'custom_id':tree.custom_id,
             'latitude': tree.latitude,
             'longitude': tree.longitude,
             'address': tree.address,
@@ -102,6 +104,7 @@ def add_tree():
             return jsonify({'error': 'Invalid address, could not find coordinates'}), 400
 
     new_tree = Tree(
+        custom_id="T12345",  # Your custom ID
         latitude=data['latitude'],
         longitude=data['longitude'],
         address=data['address'],
