@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tree Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    #map {
+      height: 90vh; /* Full-screen height for the map */
+    }
+    .form-container {
+      padding: 10px;
+      background: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tree Map</h1>
+  <div id="map"></div>
+  <div class="form-container">
+    <button id="addTreeButton">Add Tree at Current Location</button>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    const apiBaseUrl = 'http://127.0.0.1:5000'; // Update if your Flask app runs elsewhere
+
+    // Initialize map
+    const map = L.map('map').setView([0, 0], 2); // Default to world view
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Fetch and display trees
+    async function fetchTrees() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/trees`);
+        const trees = await response.json();
+        trees.forEach(tree => {
+          L.marker([tree.latitude, tree.longitude])
+            .addTo(map)
+            .bindPopup(`
+              <b>Species:</b> ${tree.species}<br>
+              <b>Condition:</b> ${tree.condition}<br>
+              <b>Address:</b> ${tree.address || 'N/A'}
+            `);
+        });
+      } catch (error) {
+        console.error('Error fetching trees:', error);
+      }
+    }
+
+    // Center the map on the user's location
+    navigator.geolocation.getCurrentPosition(position => {
+      const { latitude, longitude } = position.coords;
+      map.setView([latitude, longitude], 16);
+    });
+
+    // Add a tree at the current location
+    document.getElementById('addTreeButton').addEventListener('click', () => {
+      navigator.geolocation.getCurrentPosition(async position => {
+        const { latitude, longitude } = position.coords;
+
+        const treeData = {
+          latitude,
+          longitude,
+          address: 'Your Location',
+          species: 'Unknown',
+          condition: 'Healthy',
+          comments: 'Added via web app'
+        };
+
+        try {
+          const response = await fetch(`${apiBaseUrl}/add_tree`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(treeData)
+          });
+
+          if (response.ok) {
+            alert('Tree added successfully!');
+            location.reload(); // Reload to show the new tree on the map
+          } else {
+            alert('Failed to add tree.');
+          }
+        } catch (error) {
+          console.error('Error adding tree:', error);
+        }
+      });
+    });
+
+    // Load trees when the page loads
+    fetchTrees();
+  </script>
+</body>
+</html>
