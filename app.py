@@ -20,15 +20,24 @@ geolocator = Nominatim(user_agent="tree_locator")
 
 class Tree(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    custom_id = db.Column(db.String(50), unique=True, nullable=False)
-    latitude = db.Column(db.Float, nullable=True)  # Allow NULL for geocoding
+    custom_id = db.Column(db.String(100), unique=True, nullable=False)
+    latitude = db.Column(db.Float, nullable=True)
     longitude = db.Column(db.Float, nullable=True)
-    address = db.Column(db.String(255), nullable=True)
+    address = db.Column(db.Text, nullable=True)
     city = db.Column(db.String(100), nullable=False)
     species = db.Column(db.String(100), nullable=False)
     condition = db.Column(db.String(50), nullable=False)
     comments = db.Column(db.Text, nullable=True)
-    geom = db.Column(db.String, nullable=True)  # PostGIS geometry field
+    geom = db.Column(Geometry('POINT', srid=4326), nullable=True)
+
+    # New Columns
+    height = db.Column(db.Float, nullable=True)      # Tree height in meters
+    diameter = db.Column(db.Float, nullable=True)    # Diameter in cm
+    actions = db.Column(db.Text, nullable=True)      # Actions taken (e.g., pruned, fertilized)
+    age = db.Column(db.Integer, nullable=True)       # Estimated tree age
+    location = db.Column(db.String(255), nullable=True)  # Additional location details
+    cpc = db.Column(db.String(50), nullable=True)    # CPC (Conservation Priority Code)
+    next_check = db.Column(db.Date, nullable=True)   # Next inspection date
 
 # Create the database tables
 with app.app_context():
@@ -115,41 +124,40 @@ def delete_tree(tree_id):
     return jsonify({'message': f'Tree {tree_id} deleted successfully!'}), 200
 
 
-# ✅ 5. Add a new tree (supports geocoding)
 @app.route('/add_tree', methods=['POST'])
 def add_tree():
     data = request.json
 
-    # Convert empty strings to None
-    latitude = data.get('latitude') or None
-    longitude = data.get('longitude') or None
-    address = data.get('address') or None
-
-    # If lat/lon are missing but address exists, geocode it
-    if (not latitude or not longitude) and address:
-        location = geolocator.geocode(address)
-        if location:
-            latitude = location.latitude
-            longitude = location.longitude
-        else:
-            return jsonify({'error': 'Invalid address, could not find coordinates'}), 400
-
-    # If still missing lat/lon, return an error
-    if not latitude or not longitude:
-        return jsonify({'error': 'Either latitude/longitude or a valid address is required'}), 400
+    # Try to get lat/lon from address if missing
+    if not data.get('latitude') or not data.get('longitude'):
+        if 'address' in data and data['address']:
+            location = geolocator.geocode(data['address'])
+            if location:
+                data['latitude'] = location.latitude
+                data['longitude'] = location.longitude
+            else:
+                return jsonify({'error': 'Invalid address, could not find coordinates'}), 400
 
     new_tree = Tree(
         custom_id=data['custom_id'],
-        latitude=latitude,
-        longitude=longitude,
-        address=address,
+        latitude=data['latitude'],
+        longitude=data['longitude'],
+        address=data.get('address', ''),
         city=data['city'],
         species=data['species'],
         condition=data['condition'],
         comments=data.get('comments', ''),
-        geom=f'SRID=4326;POINT({longitude} {latitude})'
+        geom=f'SRID=4326;POINT({data["longitude"]} {data["latitude"]})',
+        # New Fields
+        height=data.get('height'),
+        diameter=data.get('diameter'),
+        actions=data.get('actions', ''),
+        age=data.get('age'),
+        location=data.get('location', ''),
+        cpc=data.get('cpc', ''),
+        next_check=data.get('next_check')
     )
 
     db.session.add(new_tree)
     db.session.commit()
-    return jsonify({'message': 'Tree added successfully!', 'latitude': latitude, 'longitude': longitude}), 201
+    return jsonify({'message': 'Tree added successfully!'}), 201

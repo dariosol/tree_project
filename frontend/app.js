@@ -28,7 +28,15 @@ document.getElementById("addTreeForm").addEventListener("submit", function(event
         longitude: document.getElementById("longitude").value,
         species: document.getElementById("species").value,
         condition: document.getElementById("condition").value,
-        comments: document.getElementById("comments").value
+        comments: document.getElementById("comments").value,
+        // New Fields
+        height: document.getElementById("height").value,
+        diameter: document.getElementById("diameter").value,
+        actions: document.getElementById("actions").value,
+        age: document.getElementById("age").value,
+        location: document.getElementById("location").value,
+        cpc: document.getElementById("cpc").value,
+        next_check: document.getElementById("next_check").value
     };
 
     fetch(`${API_BASE}/add_tree`, {
@@ -43,6 +51,7 @@ document.getElementById("addTreeForm").addEventListener("submit", function(event
     })
     .catch(error => console.error("Error:", error));
 });
+
 
 // 📍 Get GPS Location and autofill latitude/longitude
 function getLocation() {
@@ -100,6 +109,8 @@ function fetchTrees() {
     let addressPart = document.getElementById("streetSearch").value;  // Get input value
 
     let url = `${API_BASE}/trees?city=${city}`;
+    
+   
     if (addressPart) url += `&address=${encodeURIComponent(addressPart)}`;  // Send as query param
 
     fetch(url)
@@ -116,6 +127,9 @@ function fetchTrees() {
                     <td>${tree.address}</td>
                     <td>
                         <button class="btn btn-warning btn-sm" onclick="editTree(${tree.id}, '${tree.condition}', '${tree.comments}')">Edit</button>
+                    </td>
+                    <td>
+                     <button class="btn btn-primary btn-sm" onclick="viewTreeDetails(${tree.id})">View Details</button>
                     </td>
                 </tr>`;
                 tableBody.innerHTML += row;
@@ -149,6 +163,15 @@ function editTree(treeId, currentCondition, currentComments) {
     .catch(error => console.error("Error updating tree:", error));
 }
 
+
+function viewTreeDetails(treeId) {
+    fetch(`${API_BASE}/tree/${treeId}`)
+        .then(res => res.json())
+        .then(tree => {
+            alert(`Tree Details:\nSpecies: ${tree.species}\nHeight: ${tree.height}m\nDiameter: ${tree.diameter}cm\nAge: ${tree.age} years\nActions: ${tree.actions}\nNext Check: ${tree.next_check}`);
+        })
+        .catch(() => alert("Tree not found"));
+}
 
 // Fetch Tree by Custom ID
 function fetchTreeById() {
