@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from geoalchemy2 import Geometry
 from geopy.geocoders import Nominatim  # 📍 For geocoding
 import pandas as pd
 
 app = Flask(__name__)
+CORS(app)  # 🔥 This allows all domains to access the AP
 
 # Database connection
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:c0st4m4gn4@localhost/trees_db'
@@ -16,18 +18,17 @@ db = SQLAlchemy(app)
 # Geolocator for address-to-coordinates conversion
 geolocator = Nominatim(user_agent="tree_locator")
 
-# Define the Tree model
 class Tree(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    custom_id = db.Column(db.String(100), unique=True)  # Custom ID field, unique
-    latitude = db.Column(db.Float, nullable=False)
-    longitude = db.Column(db.Float, nullable=False)
-    address = db.Column(db.Text)
-    city = db.Column(db.String(100), nullable=False)  # ✅ Added city field
+    custom_id = db.Column(db.String(50), unique=True, nullable=False)
+    latitude = db.Column(db.Float, nullable=True)  # Allow NULL for geocoding
+    longitude = db.Column(db.Float, nullable=True)
+    address = db.Column(db.String(255), nullable=True)
+    city = db.Column(db.String(100), nullable=False)
     species = db.Column(db.String(100), nullable=False)
-    condition = db.Column(db.String(10), nullable=False)
-    comments = db.Column(db.Text)
-    geom = db.Column(Geometry('POINT', srid=4326), nullable=False)
+    condition = db.Column(db.String(50), nullable=False)
+    comments = db.Column(db.Text, nullable=True)
+    geom = db.Column(db.String, nullable=True)  # PostGIS geometry field
 
 # Create the database tables
 with app.app_context():
@@ -49,29 +50,25 @@ def get_streets(city):
 @app.route('/trees', methods=['GET'])
 def get_trees():
     city = request.args.get('city')
-    street = request.args.get('street')
-    
+    address_part = request.args.get('address')  # Get partial address from query params
+
     query = Tree.query
     if city:
-        query = query.filter(Tree.city == city)
-    if street:
-        query = query.filter(Tree.address.ilike(f"%{street}%"))  # Case-insensitive
+        query = query.filter(Tree.city.ilike(f"%{city}%"))  # Case-insensitive city match
+    if address_part:
+        query = query.filter(Tree.address.ilike(f"%{address_part}%"))  # Case-insensitive partial address match
 
     trees = query.all()
-    return jsonify([
-        {
-            'id': tree.id,
-            'custom_id':tree.custom_id,
-            'latitude': tree.latitude,
-            'longitude': tree.longitude,
-            'address': tree.address,
-            'city': tree.city,
-            'species': tree.species,
-            'condition': tree.condition,
-            'comments': tree.comments
-        }
-        for tree in trees
-    ])
+    
+    return jsonify([{
+        'id': tree.id,
+        'custom_id': tree.custom_id,
+        'species': tree.species,
+        'condition': tree.condition,
+        'address': tree.address,
+        'latitude': tree.latitude, 
+        'longitude': tree.longitude
+    } for tree in trees])
 
 # ✅ 4. Update tree (condition/comments only)
 @app.route('/tree/<int:tree_id>', methods=['PATCH'])
@@ -89,32 +86,70 @@ def update_tree(tree_id):
     db.session.commit()
     return jsonify({'message': f'Tree {tree_id} updated successfully!'}), 200
 
+
+@app.route('/tree/custom/<string:custom_id>', methods=['GET'])
+def get_tree_by_custom_id(custom_id):
+    tree = Tree.query.filter_by(custom_id=custom_id).first()
+    if not tree:
+        return jsonify({'message': 'Tree not found'}), 404
+    return jsonify({
+        'id': tree.id,
+        'custom_id': tree.custom_id,
+        'species': tree.species,
+        'condition': tree.condition,
+        'address': tree.address,
+        'city': tree.city,
+        'comments': tree.comments
+    })
+
+
+@app.route('/tree/<int:tree_id>', methods=['DELETE'])
+def delete_tree(tree_id):
+    tree = Tree.query.get(tree_id)
+    if not tree:
+        return jsonify({'message': 'Tree not found'}), 404
+
+    db.session.delete(tree)
+    db.session.commit()
+    
+    return jsonify({'message': f'Tree {tree_id} deleted successfully!'}), 200
+
+
 # ✅ 5. Add a new tree (supports geocoding)
 @app.route('/add_tree', methods=['POST'])
 def add_tree():
     data = request.json
 
-    # Try to get lat/lon from address if missing
-    if 'latitude' not in data or 'longitude' not in data:
-        location = geolocator.geocode(data['address'])
+    # Convert empty strings to None
+    latitude = data.get('latitude') or None
+    longitude = data.get('longitude') or None
+    address = data.get('address') or None
+
+    # If lat/lon are missing but address exists, geocode it
+    if (not latitude or not longitude) and address:
+        location = geolocator.geocode(address)
         if location:
-            data['latitude'] = location.latitude
-            data['longitude'] = location.longitude
+            latitude = location.latitude
+            longitude = location.longitude
         else:
             return jsonify({'error': 'Invalid address, could not find coordinates'}), 400
 
+    # If still missing lat/lon, return an error
+    if not latitude or not longitude:
+        return jsonify({'error': 'Either latitude/longitude or a valid address is required'}), 400
+
     new_tree = Tree(
-        custom_id="T12345",  # Your custom ID
-        latitude=data['latitude'],
-        longitude=data['longitude'],
-        address=data['address'],
-        city=data['city'],  # ✅ Required
+        custom_id=data['custom_id'],
+        latitude=latitude,
+        longitude=longitude,
+        address=address,
+        city=data['city'],
         species=data['species'],
         condition=data['condition'],
         comments=data.get('comments', ''),
-        geom=f'SRID=4326;POINT({data["longitude"]} {data["latitude"]})'
+        geom=f'SRID=4326;POINT({longitude} {latitude})'
     )
 
     db.session.add(new_tree)
     db.session.commit()
-    return jsonify({'message': 'Tree added successfully!'}), 201
+    return jsonify({'message': 'Tree added successfully!', 'latitude': latitude, 'longitude': longitude}), 201
