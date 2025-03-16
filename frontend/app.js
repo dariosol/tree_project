@@ -133,19 +133,6 @@ function fetchTrees() {
 }
 
 
-// Fetch Tree by Custom ID
-//function fetchTreeById() {
-//    let treeId = document.getElementById("treeIdInput").value;
-//    if (!treeId) return alert("Enter a Tree ID");
-//
-//    fetch(`${API_BASE}/tree/custom/${treeId}`)
-//        .then(res => res.json())
-//        .then(data => {
-//            alert(`Tree Found: ${data.species} at ${data.address}`);
-//        })
-//        .catch(() => alert("Tree not found"));
-//}
-
 function showComments(comments) {
     alert(`Tree Comments:\n${comments}`);
 }
@@ -213,8 +200,6 @@ function editTree(treeId, currentCondition, currentComments) {
 }
 
 
-
-// ✅ View Tree Details (with all fields)
 function viewTreeDetails(treeId) {
     fetch(`${API_BASE}/tree/${treeId}`)
         .then(res => res.json())
@@ -249,6 +234,7 @@ function deleteTreeById(treeId) {
         })
         .catch(error => console.error("Error deleting tree:", error));
 }
+
 
 
 let map;
@@ -323,10 +309,3 @@ function fetchTreesOnMap() {
 }
 
 
-@app.route('/test_geocode', methods=['POST'])
-def test_geocode():
-    address = request.json.get('address')
-    location = geolocator.geocode(address)
-    if location:
-        return jsonify({'latitude': location.latitude, 'longitude': location.longitude})
-    return jsonify({'error': 'Address not found'}), 404

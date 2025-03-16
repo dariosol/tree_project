@@ -200,7 +200,9 @@ def add_tree():
 
     # Handle geolocation if latitude/longitude is missing
     if not data.get('latitude') or not data.get('longitude'):
-        location = geolocator.geocode(data['address'])
+        full_address = data['address'] +" " + data['city']
+        print("full address " + full_address)
+        location = geolocator.geocode(full_address)
         if location:
             data['latitude'] = location.latitude
             data['longitude'] = location.longitude
