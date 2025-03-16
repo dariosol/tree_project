@@ -226,7 +226,7 @@ Comments: ${tree.comments}
 function deleteTreeById(treeId) {
     if (!confirm("Are you sure you want to delete this tree?")) return;
 
-    fetch(`${API_BASE}/tree/custom/${treeId}`, { method: "DELETE" })
+    fetch(`${API_BASE}/tree/${treeId}`, { method: "DELETE" })
         .then(res => res.json())
         .then(data => {
             alert(data.message);
