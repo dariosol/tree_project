@@ -167,27 +167,47 @@ function fetchTreeById() {
 }
 
 
-// ✅ Edit Tree (Condition & Comments)
 function editTree(treeId, currentCondition, currentComments) {
+    // Collect new values with prompts (or a better UI could be built)
     const newCondition = prompt("Enter new condition:", currentCondition);
     const newComments = prompt("Enter new comments:", currentComments);
+    const newActions = prompt("Actions Taken:");
+    const newHeight = prompt("Height (e.g., M):");
+    const newTrunkDiameter = prompt("Trunk Diameter (cm):");
+    const newCrownDiameter = prompt("Crown Diameter (m):");
+    const newAge = prompt("Age (e.g., Young, Old):");
+    const newLocation = prompt("Location Notes:");
+    const newCPC = prompt("CPC Code:");
+    const newNextCheck = prompt("Next Check Date (YYYY-MM-DD):");
 
     if (newCondition === null || newComments === null) {
         alert("Update canceled.");
         return;
     }
 
-    const updatedData = { condition: newCondition, comments: newComments };
+    const updatedData = {
+        condition: newCondition.trim(),
+        comments: newComments.trim(),
+        actions: newActions ? newActions.trim() : "",
+        height: newHeight ? newHeight.trim() : "",
+        trunk_diameter_cm: newTrunkDiameter ? parseFloat(newTrunkDiameter) : null,
+        crown_diameter_m: newCrownDiameter ? parseFloat(newCrownDiameter) : null,
+        age: newAge ? newAge.trim() : "",
+        location: newLocation ? newLocation.trim() : "",
+        cpc: newCPC ? newCPC.trim() : "",
+        next_check: newNextCheck ? newNextCheck.trim() : null,
+    };
 
-    fetch(`${API_BASE}/tree/custom/${treeId}`, {
+    // Send PATCH request to update the tree
+    fetch(`${API_BASE}/tree/${treeId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedData)
     })
     .then(res => res.json())
     .then(data => {
-        alert(data.message);
-        fetchTrees();
+        alert(data.message);  // Show success message
+        fetchTrees();         // Refresh the tree list
     })
     .catch(error => console.error("Error updating tree:", error));
 }
@@ -231,59 +251,82 @@ function deleteTreeById(treeId) {
 }
 
 
-// Show Trees on Map
-let map, markers = [];
+let map;
+let markers = [];
+
+// Toggle map visibility and load markers
 function toggleMap() {
     let mapDiv = document.getElementById("map");
     if (mapDiv.style.display === "none") {
         mapDiv.style.display = "block";
+
+        // Initialize map only once
         if (!map) {
-            map = L.map("map").setView([45.07, 7.69], 13); // Default: Torino
+            map = L.map("map").setView([45.07, 7.69], 13);  // Default: Torino
             L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
         }
+
         fetchTreesOnMap();
     } else {
         mapDiv.style.display = "none";
     }
 }
 
+// Display trees on the map
 function fetchTreesOnMap() {
     let city = document.getElementById("citySelect").value;
-    let addressPart = document.getElementById("streetSearch").value;
+    let addressPart = document.getElementById("streetSearch").value.trim();
 
-    let url = `${API_BASE}/trees?city=${city}`;
+    let url = `${API_BASE}/trees?city=${encodeURIComponent(city)}`;
     if (addressPart) url += `&address=${encodeURIComponent(addressPart)}`;
 
     fetch(url)
         .then(res => res.json())
         .then(data => {
             // Clear old markers
-            markers.forEach(m => map.removeLayer(m));
-            markers = [];
+            if (markers) {
+                markers.forEach(marker => map.removeLayer(marker));
+                markers = [];
+            }
 
             if (data.length === 0) {
                 alert("No trees found for the selected filters.");
                 return;
             }
 
-            // Add new markers for each tree
+            // Add markers for all valid trees
             data.forEach(tree => {
                 if (!tree.latitude || !tree.longitude) {
                     console.warn(`Skipping tree ${tree.custom_id} due to missing coordinates.`);
-                    return;  // Skip trees without coordinates
+                    return;  // Skip trees with missing coordinates
                 }
 
+                // Create a marker for each tree
                 let marker = L.marker([tree.latitude, tree.longitude])
-                    .bindPopup(`<b>${tree.species}</b><br>${tree.address}`);
+                    .bindPopup(`
+                        <b>Species:</b> ${tree.species}<br>
+                        <b>Condition:</b> ${tree.condition}<br>
+                        <b>Address:</b> ${tree.address}<br>
+                        <b>Next Check:</b> ${tree.next_check || "N/A"}
+                    `);
                 marker.addTo(map);
                 markers.push(marker);
             });
 
-            // Recenter map on first tree
-            let firstTree = data[0];
-            if (firstTree.latitude && firstTree.longitude) {
+            // Center map on the first tree found
+            const firstTree = data[0];
+            if (firstTree && firstTree.latitude && firstTree.longitude) {
                 map.setView([firstTree.latitude, firstTree.longitude], 15);
             }
         })
         .catch(error => console.error("Error fetching trees for map:", error));
 }
+
+
+@app.route('/test_geocode', methods=['POST'])
+def test_geocode():
+    address = request.json.get('address')
+    location = geolocator.geocode(address)
+    if location:
+        return jsonify({'latitude': location.latitude, 'longitude': location.longitude})
+    return jsonify({'error': 'Address not found'}), 404

@@ -8,7 +8,7 @@ from datetime import datetime
 import pandas as pd
 
 app = Flask(__name__)
-CORS(app)  # 🔥 This allows all domains to access the AP
+CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins (for development)
 
 # Database connection
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:c0st4m4gn4@localhost/trees_db'
@@ -92,8 +92,7 @@ def get_trees():
     ])
 
 
-
-#@app.route('/tree/<int:tree_id>', methods=['PATCH'])
+@app.route('/tree/<int:tree_id>', methods=['PATCH'])
 def update_tree(tree_id):
     tree = Tree.query.get(tree_id)
 
@@ -102,18 +101,21 @@ def update_tree(tree_id):
 
     data = request.json
 
-    # Update fields if provided
+    # Update the provided fields only if they are present
     for field in ['condition', 'comments', 'actions', 'height', 'trunk_diameter_cm',
                   'crown_diameter_m', 'age', 'location', 'cpc', 'next_check']:
         if field in data:
             setattr(tree, field, data[field])
 
-    if 'next_check' in data:
-        tree.next_check = datetime.strptime(data['next_check'], "%Y-%m-%d")
+    # Handle 'next_check' if provided
+    if 'next_check' in data and data['next_check']:
+        try:
+            tree.next_check = datetime.strptime(data['next_check'], "%Y-%m-%d")
+        except ValueError:
+            return jsonify({'message': 'Invalid date format for next_check. Use YYYY-MM-DD'}), 400
 
     db.session.commit()
     return jsonify({'message': f'Tree {tree_id} updated successfully!'}), 200
-
 
 
 @app.route('/tree/custom/<string:custom_id>', methods=['GET'])
@@ -232,3 +234,10 @@ def add_tree():
 
     return jsonify({'message': 'Tree added successfully!'}), 201
 
+@app.route('/test_geocode', methods=['POST'])
+def test_geocode():
+    address = request.json.get('address')
+    location = geolocator.geocode(address)
+    if location:
+        return jsonify({'latitude': location.latitude, 'longitude': location.longitude})
+    return jsonify({'error': 'Address not found'}), 404
