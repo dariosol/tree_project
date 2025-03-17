@@ -154,51 +154,76 @@ function fetchTreeById() {
 }
 
 
-function editTree(treeId, currentCondition, currentComments) {
-    // Collect new values with prompts (or a better UI could be built)
-    const newCondition = prompt("Enter new condition:", currentCondition);
-    const newComments = prompt("Enter new comments:", currentComments);
-    const newActions = prompt("Actions Taken:");
-    const newHeight = prompt("Height (e.g., M):");
-    const newTrunkDiameter = prompt("Trunk Diameter (cm):");
-    const newCrownDiameter = prompt("Crown Diameter (m):");
-    const newAge = prompt("Age (e.g., Young, Old):");
-    const newLocation = prompt("Location Notes:");
-    const newCPC = prompt("CPC Code:");
-    const newNextCheck = prompt("Next Check Date (YYYY-MM-DD):");
+// Switch to Edit Mode: Pre-fill form
+function editTree(treeId) {
+    fetch(`${API_BASE}/tree/${treeId}`)
+        .then(res => res.json())
+        .then(tree => {
+            // Populate the form with existing data
+            document.getElementById("editTreeId").value = tree.id;
 
-    if (newCondition === null || newComments === null) {
-        alert("Update canceled.");
-        return;
-    }
+            document.getElementById("formTitle").innerText = "✍️ Edit Tree";
+            document.getElementById("formSubmitButton").innerText = "💾 Save Changes";
 
-    const updatedData = {
-        condition: newCondition.trim(),
-        comments: newComments.trim(),
-        actions: newActions ? newActions.trim() : "",
-        height: newHeight ? newHeight.trim() : "",
-        trunk_diameter_cm: newTrunkDiameter ? parseFloat(newTrunkDiameter) : null,
-        crown_diameter_m: newCrownDiameter ? parseFloat(newCrownDiameter) : null,
-        age: newAge ? newAge.trim() : "",
-        location: newLocation ? newLocation.trim() : "",
-        cpc: newCPC ? newCPC.trim() : "",
-        next_check: newNextCheck ? newNextCheck.trim() : null,
+            Object.keys(tree).forEach(field => {
+                const input = document.getElementById(field);
+                if (input) input.value = tree[field] || "";
+            });
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        })
+        .catch(() => alert("Error loading tree for editing."));
+}
+
+// Submit Form: Handle Add or Edit Mode
+document.getElementById("addTreeForm").addEventListener("submit", function(event) {
+    event.preventDefault();
+
+    const treeId = document.getElementById("editTreeId").value;
+
+    const treeData = {
+        custom_id: document.getElementById("custom_id").value.trim(),
+        city: document.getElementById("city").value.trim(),
+        address: document.getElementById("address").value.trim(),
+        latitude: parseFloat(document.getElementById("latitude").value) || null,
+        longitude: parseFloat(document.getElementById("longitude").value) || null,
+        species: document.getElementById("species").value.trim(),
+        condition: document.getElementById("condition").value.trim(),
+        comments: document.getElementById("comments").value.trim(),
+        height: document.getElementById("height").value.trim(),
+        trunk_diameter_cm: parseFloat(document.getElementById("trunk_diameter_cm").value) || null,
+        crown_diameter_m: parseFloat(document.getElementById("crown_diameter_m").value) || null,
+        age: document.getElementById("age").value.trim(),
+        actions: document.getElementById("actions").value.trim(),
+        location: document.getElementById("location").value.trim(),
+        cpc: document.getElementById("cpc").value.trim(),
+        next_check: document.getElementById("next_check").value || null
     };
 
-    // Send PATCH request to update the tree
-    fetch(`${API_BASE}/tree/${treeId}`, {
-        method: "PATCH",
+    const url = treeId ? `${API_BASE}/tree/${treeId}` : `${API_BASE}/add_tree`;
+    const method = treeId ? "PATCH" : "POST";
+
+    fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedData)
+        body: JSON.stringify(treeData)
     })
     .then(res => res.json())
     .then(data => {
-        alert(data.message);  // Show success message
-        fetchTrees();         // Refresh the tree list
+        alert(data.message);
+        resetForm();
+        fetchTrees();
     })
-    .catch(error => console.error("Error updating tree:", error));
-}
+    .catch(error => console.error("Error saving tree:", error));
+});
 
+// Reset Form: Back to Add Mode
+function resetForm() {
+    document.getElementById("addTreeForm").reset();
+    document.getElementById("editTreeId").value = "";
+    document.getElementById("formTitle").innerText = "🌳 Add a New Tree";
+    document.getElementById("formSubmitButton").innerText = "🌳 Add Tree";
+}
 
 function viewTreeDetails(treeId) {
     fetch(`${API_BASE}/tree/${treeId}`)

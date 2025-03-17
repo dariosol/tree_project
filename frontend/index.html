@@ -64,9 +64,10 @@
         </tbody>
     </table>
 
-    <!-- Add Tree Form -->
-    <h3>🌿 Add a New Tree</h3>
+    <h3 id="formTitle">🌿 Add a New Tree</h3>
     <form id="addTreeForm">
+        <input type="hidden" id="editTreeId">
+    
         <div class="row mb-3">
             <div class="col-md-4">
                 <label for="custom_id">Custom ID:</label>
@@ -81,21 +82,21 @@
                 <input type="text" id="address" class="form-control">
             </div>
         </div>
-
+    
         <div class="row mb-3">
             <div class="col-md-4">
                 <label for="latitude">Latitude:</label>
-                <input type="number" id="latitude" class="form-control" step="any">
+                <input type="text" id="latitude" class="form-control" required>
             </div>
             <div class="col-md-4">
                 <label for="longitude">Longitude:</label>
-                <input type="number" id="longitude" class="form-control" step="any">
+                <input type="text" id="longitude" class="form-control" required>
             </div>
             <div class="col-md-4 d-flex align-items-end">
                 <button type="button" class="btn btn-info w-100" onclick="getLocation()">📍 Use GPS Location</button>
             </div>
         </div>
-
+    
         <div class="row mb-3">
             <div class="col-md-4">
                 <label for="species">Species:</label>
@@ -110,40 +111,39 @@
                 <textarea id="comments" class="form-control"></textarea>
             </div>
         </div>
-
-        <!-- ✅ New Fields: Additional Tree Information -->
+    
+        <!-- Additional Details -->
         <h4>🌱 Additional Details</h4>
-
         <div class="row mb-3">
             <div class="col-md-4">
-                <label for="height">Height (e.g., M, L):</label>
+                <label for="height">Height (m):</label>
                 <input type="text" id="height" class="form-control">
             </div>
             <div class="col-md-4">
                 <label for="trunk_diameter_cm">Trunk Diameter (cm):</label>
-                <input type="number" id="trunk_diameter_cm" class="form-control" step="0.01">
+                <input type="number" id="trunk_diameter_cm" class="form-control">
             </div>
             <div class="col-md-4">
                 <label for="crown_diameter_m">Crown Diameter (m):</label>
-                <input type="number" id="crown_diameter_m" class="form-control" step="0.01">
+                <input type="number" id="crown_diameter_m" class="form-control">
             </div>
         </div>
-
+    
         <div class="row mb-3">
+            <div class="col-md-4">
+                <label for="age">Age:</label>
+                <input type="text" id="age" class="form-control">
+            </div>
             <div class="col-md-4">
                 <label for="actions">Actions Taken:</label>
                 <input type="text" id="actions" class="form-control">
             </div>
             <div class="col-md-4">
-                <label for="age">Age (e.g., Young, Mature):</label>
-                <input type="text" id="age" class="form-control">
-            </div>
-            <div class="col-md-4">
-                <label for="location">Location Notes:</label>
+                <label for="location">Location:</label>
                 <input type="text" id="location" class="form-control">
             </div>
         </div>
-
+    
         <div class="row mb-3">
             <div class="col-md-4">
                 <label for="cpc">CPC Code:</label>
@@ -154,10 +154,12 @@
                 <input type="date" id="next_check" class="form-control">
             </div>
         </div>
-
-        <button type="submit" class="btn btn-success">🌳 Add Tree</button>
+    
+        <!-- Buttons: Dynamic based on mode -->
+        <button type="submit" class="btn btn-success" id="formSubmitButton">🌳 Add Tree</button>
+        <button type="button" class="btn btn-secondary" onclick="resetForm()">Cancel Edit</button>
     </form>
-
+        
     <p id="status" class="mt-2"></p>
 
     <!-- Map (Hidden by Default) -->
