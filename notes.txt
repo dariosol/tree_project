@@ -1,0 +1,2 @@
+- possibilita' di salvare foto.
+- storia. una freccia del tempo con un punto per ogni inserzione
