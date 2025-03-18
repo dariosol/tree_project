@@ -1,5 +1,84 @@
 const API_BASE = "http://127.0.0.1:5000";  // Flask Backend
 
+let token = localStorage.getItem("token") || null;
+
+// ✅ Handle Login
+document.getElementById("loginForm").addEventListener("submit", async function(event) {
+    event.preventDefault();
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+
+    try {
+        const response = await fetch(`${API_BASE}/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            token = data.token;
+            localStorage.setItem("token", token);
+            document.getElementById("loginStatus").innerText = "✅ Logged in successfully!";
+        } else {
+            alert(data.message);
+        }
+    } catch (error) {
+        alert("Error logging in");
+    }
+});
+
+// ✅ Handle Logout
+function logout() {
+    token = null;
+    localStorage.removeItem("token");
+    alert("Logged out!");
+}
+
+// ✅ Helper for Secure Requests
+async function secureFetch(url, options = {}) {
+    if (!token) {
+        alert("You must log in first!");
+        return;
+    }
+    options.headers = {
+        ...options.headers,
+        Authorization: `Bearer ${token}`
+    };
+    return fetch(url, options);
+}
+
+// ✅ Handle User Registration
+document.getElementById("registerForm").addEventListener("submit", function(event) {
+    event.preventDefault();
+
+    const userData = {
+        username: document.getElementById("regUsername").value.trim(),
+        password: document.getElementById("regPassword").value.trim()
+    };
+
+    // Validate input
+    if (!userData.username || !userData.password) {
+        alert("Username and password are required.");
+        return;
+    }
+
+    // Send registration request
+    fetch(`${API_BASE}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById("registerStatus").innerText = data.message;
+        if (data.message.includes("successfully")) {
+            alert("Registration successful! Please log in.");
+        }
+    })
+    .catch(error => console.error("Registration error:", error));
+});
+
+
 // ✅ Fetch Cities on Page Load
 window.onload = () => {
     fetch(`${API_BASE}/cities`)

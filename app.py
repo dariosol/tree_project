@@ -2,13 +2,25 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 from geoalchemy2 import Geometry
 from geopy.geocoders import Nominatim  # 📍 For geocoding
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
+from functools import wraps
+import bcrypt  # For password hashing
+import jwt    # JSON Web Tokens for authentication
+import os
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins (for development)
+
+# Secret key for JWT (keep it safe!)
+app.config['SECRET_KEY'] = 'your_secret_key_here'
+
 
 # Database connection
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:c0st4m4gn4@localhost/trees_db'
@@ -16,6 +28,147 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
+#############################################################
+#############################################################
+#############################################################
+##AUTHENTICATION SECTION
+# User Model
+# Ensure user model matches
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password_hash = db.Column(db.Text, nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='user')
+
+# Create tables
+with app.app_context():
+    db.create_all()
+
+
+# Helper: Generate JWT Token
+def generate_token(user):
+    payload = {
+        'user_id': user.id,
+        'username': user.username,
+        'role': user.role,
+        'exp': datetime.utcnow() + timedelta(hours=12)  # Token expires in 12 hours
+    }
+    return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+
+# Helper: Authenticate Requests
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'message': 'Authorization required'}), 401
+        try:
+            # Extract token (Bearer <token>)
+            token = token.split()[1]
+            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            request.user = payload
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Invalid token'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/register', methods=['POST'])
+def public_register():
+    data = request.json
+
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'message': 'Missing username or password'}), 400
+
+    # Check if user already exists
+    existing_user = User.query.filter_by(username=username).first()
+    if existing_user:
+        return jsonify({'message': 'Username already taken'}), 409
+
+    try:
+        # Hash password and create user
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        new_user = User(username=username, password_hash=hashed_password, role='user')
+
+        # ✅ Add and commit without flush/close (safer for PostgreSQL)
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({'message': f'User {username} registered successfully!'}), 201
+    except Exception as e:
+        # Rollback if there's an error
+        db.session.rollback()
+        app.logger.error(f"Error registering user: {e}")
+        return jsonify({'message': f'Error registering user: {str(e)}'}), 500
+
+
+# ✅ Admin-Only Registration (Authorization Required)
+@app.route('/admin/register', methods=['POST'])
+@login_required
+def admin_register():
+    if request.user['role'] != 'admin':
+        return jsonify({'message': 'Admins only!'}), 403
+
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    role = data.get('role', 'user')
+
+    if not username or not password:
+        return jsonify({'message': 'Username and password are required'}), 400
+
+    # Check if username already exists
+    if User.query.filter_by(username=username).first():
+        return jsonify({'message': 'Username already taken'}), 409
+
+    # Hash password and create new user (can specify user/admin role)
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    new_user = User(username=username, password_hash=hashed_password, role=role)
+
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({'message': f'User {username} registered successfully by admin!'}), 201
+
+# ✅ User Login (Returns JWT Token)
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'message': 'Username and password are required'}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if not user or not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+        return jsonify({'message': 'Invalid credentials'}), 401
+
+    token = generate_token(user)
+    return jsonify({'token': token})
+
+# ✅ Protected Example (Test Access Control)
+@app.route('/protected', methods=['GET'])
+@login_required
+def protected():
+    return jsonify({
+        'message': f'Hello, {request.user["username"]}! You are a {request.user["role"]}.'
+    })
+
+
+@app.route('/debug_users', methods=['GET'])
+def debug_users():
+    result = db.session.execute(text("SELECT current_schema();"))
+    print("Current schema:", result.scalar())  # Debugging current schema
+    users = User.query.all()
+    return jsonify([{'id': user.id, 'username': user.username, 'role': user.role} for user in users])
+#############################################################
+#############################################################
+#############################################################
 # Geolocator for address-to-coordinates conversion
 geolocator = Nominatim(user_agent="tree_locator")
 

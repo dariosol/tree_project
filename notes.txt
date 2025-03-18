@@ -1,2 +1,9 @@
+ROADMAP 17-03-2025
+Phase 1: Implement User Authentication (Essential for tracking who made changes).
+Phase 2: Add Modification History (Log edits and store images).
+Phase 3: Enable Image Uploads (Attach images to modifications).
+Phase 4: Support QGIS Integration (Export/Import).
+
+
 - possibilita' di salvare foto.
 - storia. una freccia del tempo con un punto per ogni inserzione
