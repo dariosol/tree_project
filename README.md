@@ -207,11 +207,13 @@ Senza `--sqlite` usa `DATABASE_URL` (PostgreSQL) come `app.py`.
 
 | Ruolo | Permessi |
 |-------|----------|
-| **superuser** | Accesso completo: gestione utenti, città, tutti gli alberi |
-| **city** | Gestisce gli alberi del proprio comune e collega gli agronomi (`user`) al comune |
-| **user** (agronomo) | Censisce e valuta gli alberi dei comuni a cui è collegato |
+| **superuser** | Accesso completo: gestione utenti, città, tutti gli alberi (lettura e scrittura) |
+| **city** (comune) | **Sola lettura** sugli alberi del proprio comune: li visualizza, li esporta e genera le schede; collega gli agronomi (`user`) al comune |
+| **user** (agronomo) | Censisce, modifica e valuta i propri alberi nei comuni a cui è collegato |
 
 L'accesso agli alberi è filtrato per comune tramite il modello `CityMembership` (relazione città ↔ agronomi).
+
+L'utente `city` **non può modificare gli alberi**: l'interfaccia è la stessa degli altri ruoli, ma qualsiasi tentativo di salvataggio (aggiunta, modifica, eliminazione, ispezione, importazione) viene rifiutato dal backend con `403` e il messaggio *"Solo gli utenti agronomi possono modificare i campi degli alberi: l'utente comune ha accesso in sola lettura."*, mostrato nella barra di stato. Il controllo è centralizzato in `_city_readonly()` in [`app.py`](app.py).
 
 Gli utenti vengono creati da un `superuser` (qualsiasi ruolo) o da un `city` (solo agronomi del proprio comune). La **registrazione pubblica** (`/register` + link "Crea account") è **disabilitata di default**: si riattiva impostando `REGISTRATION_ENABLED=true` e ripristinando il link nel frontend (vedi commenti in `frontend/index.html` e `frontend/app.js`).
 
@@ -371,13 +373,13 @@ Valori già in forma testuale (es. file esportati da Silvae Pro) vengono lasciat
 | `GET`    | `/trees` | Lista alberi (filtri: city, address, species, page) |
 | `GET`    | `/tree/<id>` | Dettaglio albero per ID |
 | `GET`    | `/tree/custom/<custom_id>` | Dettaglio albero per ID personalizzato |
-| `POST`   | `/add_tree` | Aggiunge un nuovo albero |
-| `PATCH`  | `/tree/<id>` | Aggiorna dati albero |
-| `DELETE` | `/tree/<id>` | Elimina albero |
-| `DELETE` | `/trees/bulk` | Elimina più alberi in blocco |
-| `POST`   | `/calculate_risk` | Calcola il rischio ORD per un albero |
+| `POST`   | `/add_tree` | Aggiunge un nuovo albero *(non consentito a `city`)* |
+| `PATCH`  | `/tree/<id>` | Aggiorna dati albero *(non consentito a `city`)* |
+| `DELETE` | `/tree/<id>` | Elimina albero *(non consentito a `city`)* |
+| `DELETE` | `/trees/bulk` | Elimina più alberi in blocco *(non consentito a `city`)* |
+| `POST`   | `/calculate_risk` | Calcola il rischio ORD per un albero (solo calcolo, nessuna scrittura) |
 | `GET`    | `/tree/<id>/inspections` | Storico valutazioni rischio |
-| `POST`   | `/tree/<id>/inspections` | Aggiunge una valutazione/ispezione |
+| `POST`   | `/tree/<id>/inspections` | Aggiunge una valutazione/ispezione *(non consentito a `city`)* |
 | `GET`    | `/dropdowns` | Valori per i menu a tendina (specie, tipi bersaglio, …) |
 
 ### Import / Export
@@ -389,7 +391,7 @@ Valori già in forma testuale (es. file esportati da Silvae Pro) vengono lasciat
 | `GET`  | `/export/gpkg` | Esporta alberi in GeoPackage — attributi ARETE + geometria (`?ids=`, `?rename=`, `?exclude=` opzionali) |
 | `GET`  | `/export/gpkg/columns` | Nomi/tipi di default delle colonne del GPKG (per rinomina/esclusione in export) |
 | `POST` | `/import/gpkg/inspect` | Anteprima colonne e mappatura automatica di un .gpkg |
-| `POST` | `/import/gpkg` | Importa alberi da .gpkg (multipart: `file`, `city`, `on_conflict=skip\|update`) |
+| `POST` | `/import/gpkg` | Importa alberi da .gpkg (multipart: `file`, `city`, `on_conflict=skip\|update`) *(non consentito a `city`)* |
 
 ### Report — Schede albero
 

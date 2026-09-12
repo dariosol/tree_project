@@ -628,6 +628,17 @@ def role_required(*allowed_roles):
         return wrapper
     return decorator
 
+CITY_READONLY_MSG = ("Solo gli utenti agronomi possono modificare i campi degli alberi: "
+                     "l'utente comune ha accesso in sola lettura.")
+
+def _city_readonly():
+    """L'utente `city` vede ed esporta gli alberi del proprio comune ma non li
+    modifica: ritorna la risposta 403 da restituire, oppure None se il chiamante
+    può scrivere (`user` sui propri alberi, `superuser` ovunque)."""
+    if request.user.get('role') == 'city':
+        return jsonify({'message': CITY_READONLY_MSG}), 403
+    return None
+
 # -----------------------
 # Auth endpoints
 # -----------------------
@@ -1054,6 +1065,7 @@ def get_tree_by_id(tree_id):
 @app.route('/tree/<int:tree_id>', methods=['PATCH'])
 @auth_required
 def update_tree(tree_id):
+    if (denied := _city_readonly()): return denied
     tree = db.session.get(Tree, tree_id)
     if not tree: return jsonify({'message': 'Tree not found'}), 404
     role, user_id, user_city = (request.user.get(k) for k in ('role','user_id','city'))
@@ -1088,6 +1100,7 @@ def update_tree(tree_id):
 @app.route('/tree/<int:tree_id>', methods=['DELETE'])
 @auth_required
 def delete_tree(tree_id):
+    if (denied := _city_readonly()): return denied
     tree = db.session.get(Tree, tree_id)
     if not tree: return jsonify({'message': 'Tree not found'}), 404
     role, user_id, user_city = (request.user.get(k) for k in ('role','user_id','city'))
@@ -1099,6 +1112,7 @@ def delete_tree(tree_id):
 @app.route('/trees/bulk', methods=['DELETE'])
 @auth_required
 def delete_trees_bulk():
+    if (denied := _city_readonly()): return denied
     user_id   = request.user.get('user_id')
     role      = request.user.get('role')
     user_city = request.user.get('city')
@@ -1119,6 +1133,7 @@ def delete_trees_bulk():
 @app.route('/add_tree', methods=['POST'])
 @auth_required
 def add_tree():
+    if (denied := _city_readonly()): return denied
     data = request.json or {}
     user_id = request.user.get('user_id')
     role    = request.user.get('role')
@@ -1205,6 +1220,7 @@ def get_inspections(tree_id):
 @app.route('/tree/<int:tree_id>/inspections', methods=['POST'])
 @auth_required
 def add_inspection(tree_id):
+    if (denied := _city_readonly()): return denied
     tree = db.session.get(Tree, tree_id)
     if not tree: return jsonify({'message': 'Tree not found'}), 404
     role, user_id, user_city = (request.user.get(k) for k in ('role','user_id','city'))
@@ -2011,6 +2027,7 @@ def inspect_gpkg_route():
 @app.route('/import/gpkg', methods=['POST'])
 @auth_required
 def import_gpkg_route():
+    if (denied := _city_readonly()): return denied
     user_id   = request.user.get('user_id')
     role      = request.user.get('role')
     user_city = request.user.get('city')
