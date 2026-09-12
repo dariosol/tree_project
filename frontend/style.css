@@ -249,6 +249,11 @@ body {
   white-space: nowrap; text-overflow: ellipsis;
 }
 .nav-user-badge i { opacity: .75; flex-shrink: 0; }
+.nav-code-badge {
+  border: 1.5px solid rgba(255,255,255,.28); cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .5px;
+}
+.nav-code-badge:hover { background: rgba(255,255,255,.22); }
 .btn-logout {
   padding: 7px 14px;
   border: 1.5px solid rgba(255,255,255,.28);

@@ -6,7 +6,7 @@
   <title>Silvae Pro</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260912">
   <style>
     .diag-row{display:flex;gap:6px;align-items:center;margin-bottom:4px;}
     .diag-row select{flex:1;min-width:0;}
@@ -216,6 +216,16 @@
         <i class="fa-solid fa-circle-user"></i>
         <span id="loggedInUser"></span>
       </div>
+      <!-- Codice agronomo (solo ruolo user): da comunicare al comune per il collegamento -->
+      <button id="agroCodeBadge" class="nav-user-badge nav-code-badge" style="display:none;" type="button"
+              title="Il tuo codice agronomo: comunicalo al comune per farti collegare. Clicca per copiarlo.">
+        <i class="fa-solid fa-id-card"></i>
+        <span id="agroCodeText"></span>
+        <i class="fa-regular fa-copy" style="font-size:11px;"></i>
+      </button>
+      <button id="accountBtn" class="btn-logout" type="button" title="Il mio account: email e password" onclick="openAccount()">
+        <i class="fa-solid fa-user-gear"></i>
+      </button>
       <button id="logoutBtn" class="btn-logout"><i class="fa-solid fa-right-from-bracket"></i> Esci</button>
     </div>
   </nav>
@@ -898,6 +908,7 @@
             <div class="form-row mb-sm">
               <input id="newUsername" class="inp" placeholder="Nome utente">
               <input id="newPassword" type="password" class="inp" placeholder="Password">
+              <input id="newEmail" type="email" class="inp" placeholder="Email (opzionale)" autocomplete="off">
               <select id="newRole" class="inp" style="max-width:110px;">
                 <option value="user">utente</option>
                 <option value="city">comune</option>
@@ -918,10 +929,18 @@
           <div class="panel-head"><i class="fa-solid fa-user-tie"></i> Agronomi del Comune</div>
           <div class="panel-body">
             <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-              Aggiungi gli agronomi che lavorano per questo comune. Solo i loro alberi saranno visibili al comune.
+              Aggiungi gli agronomi che lavorano per questo comune inserendo il <strong>codice agronomo</strong>
+              (formato <code>AGR-XXXX-XXXX</code>) che l'agronomo trova nella propria app. Solo i loro alberi saranno visibili al comune.
             </p>
+            <!-- Solo superuser: scelta del comune su cui operare (per il ruolo city è implicito) -->
+            <div id="agroCityRow" class="form-row mb-sm" style="display:none;">
+              <select id="agroCitySelect" class="inp" onchange="loadAgronomists()">
+                <option value="">— Seleziona il comune —</option>
+              </select>
+            </div>
             <div class="form-row mb-sm">
-              <input id="addAgronomistUsername" class="inp" placeholder="Nome utente dell'Agronomo">
+              <input id="addAgronomistUsername" class="inp" placeholder="Codice agronomo (AGR-XXXX-XXXX)"
+                     autocapitalize="characters" spellcheck="false">
               <button id="addAgronomistBtn" class="btn btn-primary btn-sm" style="flex:0 0 auto;">
                 <i class="fa-solid fa-plus"></i> Aggiungi
               </button>
@@ -1278,8 +1297,8 @@ rischio_finale   = lookup_inverso(probabilità_n)    ← foglio A, colonne AR:AS
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js"></script>
-<script src="voice.js"></script>
+<script src="app.js?v=20260912"></script>
+<script src="voice.js?v=20260912"></script>
 
 <!-- Modale: Mapping campi importazione -->
 <div class="info-modal-overlay" id="importMappingModal" onclick="if(event.target===this)closeImportMapping()">
@@ -1401,6 +1420,59 @@ rischio_finale   = lookup_inverso(probabilità_n)    ← foglio A, colonne AR:AS
       <button class="btn btn-outline" style="flex:1;" onclick="closeCoordCheck()">Annulla</button>
       <button class="btn btn-primary" style="flex:1;" onclick="confirmCoordCheck()"><i class="fa-solid fa-check"></i> Conferma</button>
     </div>
+  </div>
+</div>
+
+<!-- Modale: account dell'utente loggato (email per il recupero password, cambio password) -->
+<div class="info-modal-overlay" id="accountModal" onclick="if(event.target===this)closeAccount()">
+  <div class="info-modal" style="max-width:440px;padding:16px 16px 14px;">
+    <button class="info-modal-close" onclick="closeAccount()">&times;</button>
+    <h3 style="margin-bottom:6px;"><i class="fa-solid fa-user-gear" style="color:var(--g700);margin-right:6px;"></i>Il mio account</h3>
+    <div id="accountInfo" style="font-size:13px;color:var(--text-muted);margin:0 0 12px;"></div>
+
+    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Email</div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">Serve per il recupero della password ("Password dimenticata" nella schermata di accesso).</p>
+    <form id="accountEmailForm" onsubmit="submitAccountEmail(event)" autocomplete="off">
+      <div class="form-row mb-sm">
+        <input id="accountEmail" class="inp" type="email" placeholder="La tua email" autocomplete="email">
+        <button type="submit" class="btn btn-primary btn-sm" style="flex:0 0 auto;"><i class="fa-solid fa-floppy-disk"></i> Salva email</button>
+      </div>
+    </form>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+
+    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Cambia password</div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">Inserisci la password attuale e scegli una nuova password (minimo 6 caratteri).</p>
+    <form id="changePwForm" onsubmit="submitChangePassword(event)" autocomplete="off">
+      <input id="pwCurrent" class="inp mb-sm" type="password" placeholder="Password attuale" autocomplete="current-password" required>
+      <input id="pwNew" class="inp mb-sm" type="password" placeholder="Nuova password" autocomplete="new-password" required minlength="6">
+      <input id="pwNew2" class="inp mb-sm" type="password" placeholder="Ripeti la nuova password" autocomplete="new-password" required minlength="6">
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button type="button" class="btn btn-outline" style="flex:1;" onclick="closeAccount()">Chiudi</button>
+        <button type="submit" class="btn btn-primary" style="flex:1;"><i class="fa-solid fa-check"></i> Cambia password</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modale (solo superuser): modifica email / password di un utente -->
+<div class="info-modal-overlay" id="editUserModal" onclick="if(event.target===this)closeEditUser()">
+  <div class="info-modal" style="max-width:420px;padding:16px 16px 14px;">
+    <button class="info-modal-close" onclick="closeEditUser()">&times;</button>
+    <h3 style="margin-bottom:6px;"><i class="fa-solid fa-user-pen" style="color:var(--g700);margin-right:6px;"></i>Modifica utente</h3>
+    <div id="editUserInfo" style="font-size:13px;color:var(--text-muted);margin:0 0 12px;"></div>
+    <form id="editUserForm" onsubmit="submitEditUser(event)" autocomplete="off">
+      <input type="hidden" id="editUserId">
+      <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Email</div>
+      <input id="editUserEmail" class="inp mb-sm" type="email" placeholder="Email (vuota = nessuna)" autocomplete="off">
+      <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Nuova password</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">Lascia vuoto per non cambiarla. Comunica la password temporanea all'utente, che potrà poi cambiarla da "Il mio account".</p>
+      <input id="editUserPassword" class="inp mb-sm" type="text" placeholder="Nuova password (opzionale, min. 6 caratteri)" autocomplete="off" minlength="6">
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button type="button" class="btn btn-outline" style="flex:1;" onclick="closeEditUser()">Annulla</button>
+        <button type="submit" class="btn btn-primary" style="flex:1;"><i class="fa-solid fa-floppy-disk"></i> Salva</button>
+      </div>
+    </form>
   </div>
 </div>
 

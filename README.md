@@ -215,6 +215,15 @@ L'accesso agli alberi è filtrato per comune tramite il modello `CityMembership`
 
 L'utente `city` **non può modificare gli alberi**: l'interfaccia è la stessa degli altri ruoli, ma qualsiasi tentativo di salvataggio (aggiunta, modifica, eliminazione, ispezione, importazione) viene rifiutato dal backend con `403` e il messaggio *"Solo gli utenti agronomi possono modificare i campi degli alberi: l'utente comune ha accesso in sola lettura."*, mostrato nella barra di stato. Il controllo è centralizzato in `_city_readonly()` in [`app.py`](app.py).
 
+### Onboarding di un comune e collegamento degli agronomi
+
+1. Il `superuser` crea l'account del comune dal tab **Gestione** (ruolo `city`, nome del comune, email opzionale) con una **password temporanea** e la comunica al comune.
+2. Il comune accede e apre **Il mio account** (pulsante nell'header, disponibile per tutti i ruoli): qui **cambia la password** (richiede quella attuale; `POST /change-password`) e imposta la propria **email**, necessaria per il recupero password con "Password dimenticata" (`PATCH /me`).
+3. Ogni agronomo (ruolo `user`) ha un **codice agronomo** univoco e permanente nel formato `AGR-XXXX-XXXX`, generato una volta sola alla creazione dell'account (e assegnato automaticamente agli account esistenti al primo avvio/login). L'agronomo lo vede nell'header dell'app e lo copia con un clic.
+4. Il comune inserisce il codice nel pannello **Agronomi del Comune** (tab Gestione) per collegare l'agronomo: da quel momento vede i suoi alberi. Il collegamento per il ruolo `city` avviene **solo tramite codice**.
+5. Il `superuser` può fare la stessa associazione da un pannello identico, scegliendo il comune da un selettore e inserendo il codice **oppure** lo username dell'agronomo; nella lista utenti vede i codici di tutti gli agronomi.
+6. **Assistenza**: dalla lista utenti il `superuser` può modificare l'**email** di qualsiasi account e impostargli una **nuova password** temporanea (`PATCH /admin/users/<id>`), ad es. per un utente che non riesce più ad accedere.
+
 Gli utenti vengono creati da un `superuser` (qualsiasi ruolo) o da un `city` (solo agronomi del proprio comune). La **registrazione pubblica** (`/register` + link "Crea account") è **disabilitata di default**: si riattiva impostando `REGISTRATION_ENABLED=true` e ripristinando il link nel frontend (vedi commenti in `frontend/index.html` e `frontend/app.js`).
 
 ---
@@ -348,12 +357,15 @@ Valori già in forma testuale (es. file esportati da Silvae Pro) vengono lasciat
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | `POST` | `/login` | Autenticazione, restituisce JWT |
-| `GET`  | `/me` | Dati dell'utente autenticato |
+| `GET`  | `/me` | Dati dell'utente autenticato (inclusi `email` e, per gli agronomi, `agronomer_code`) |
+| `PATCH` | `/me` | Aggiorna l'email del proprio account (`{"email": "..."}`, stringa vuota per rimuoverla) |
 | `POST` | `/register` | Auto-registrazione (ruolo `user`) — **disabilitato** salvo `REGISTRATION_ENABLED=true` |
 | `POST` | `/forgot-password` | Invia il link di reset password via email |
 | `POST` | `/reset-password` | Imposta una nuova password tramite token |
-| `POST` | `/add_user` | Crea un utente (solo `city`/`superuser`) |
-| `GET`  | `/users` | Lista utenti visibili al chiamante |
+| `POST` | `/change-password` | Cambia la password dell'utente loggato (`current_password`, `new_password`) |
+| `POST` | `/add_user` | Crea un utente (solo `city`/`superuser`; `email` opzionale) |
+| `GET`  | `/users` | Lista utenti visibili al chiamante (con `agronomer_code` per il `superuser`) |
+| `PATCH` | `/admin/users/<id>` | Il `superuser` aggiorna `email` e/o `password` di un utente (account demo esclusi) |
 
 ### Città e agronomi
 
@@ -362,8 +374,8 @@ Valori già in forma testuale (es. file esportati da Silvae Pro) vengono lasciat
 | `POST`   | `/admin/cities` | Crea una città (solo `superuser`) |
 | `GET`    | `/cities` | Lista delle città presenti |
 | `GET`    | `/comuni/search` | Autocompletamento comuni italiani (`?q=`) |
-| `GET`    | `/city/agronomers` | Agronomi collegati al comune |
-| `POST`   | `/city/agronomers` | Collega un agronomo al comune |
+| `GET`    | `/city/agronomers` | Agronomi collegati al comune (`?city_user_id=` per il `superuser`) |
+| `POST`   | `/city/agronomers` | Collega un agronomo al comune tramite `code` (codice agronomo); il `superuser` può usare anche `username` e `city_user_id` |
 | `DELETE` | `/city/agronomers/<id>` | Scollega un agronomo |
 
 ### Alberi e valutazioni

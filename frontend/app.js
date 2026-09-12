@@ -533,6 +533,7 @@ function setupAuthUI() {
         document.getElementById('loggedInUser').textContent =
             `${state.user.username}  (${state.user.role}${state.user.city ? ' · ' + state.user.city : ''})`;
         showRoleFeatures(state.user.role);
+        showAgronomerCode();
         populateUsers();
     } else {
         loginPage.style.display = 'flex';
@@ -541,11 +542,52 @@ function setupAuthUI() {
     }
 }
 
+// Badge col codice agronomo nell'header (solo ruolo `user`). Il codice viene
+// letto da /me così è disponibile anche per sessioni salvate prima della sua
+// introduzione; un clic lo copia negli appunti.
+async function showAgronomerCode() {
+    const badge = document.getElementById('agroCodeBadge');
+    if (!badge) return;
+    if (!state.user || state.user.role !== 'user') { badge.style.display = 'none'; return; }
+    let code = state.user.agronomer_code;
+    if (!code) {
+        try {
+            const res = await fetch(`${API_BASE}/me`, {headers: authHeader()});
+            if (res.ok) {
+                code = (await res.json()).agronomer_code;
+                state.user.agronomer_code = code;
+                localStorage.setItem('user', JSON.stringify(state.user));
+            }
+        } catch (_) { /* rete assente: il badge resta nascosto */ }
+    }
+    if (!code) { badge.style.display = 'none'; return; }
+    document.getElementById('agroCodeText').textContent = code;
+    badge.style.display = 'flex';
+}
+
+async function copyAgronomerCode() {
+    const code = document.getElementById('agroCodeText').textContent;
+    if (!code) return;
+    try {
+        await navigator.clipboard.writeText(code);
+        showStatus(`Codice agronomo ${code} copiato negli appunti`, 'success');
+    } catch (_) {
+        showStatus(`Il tuo codice agronomo è ${code}`, 'info');
+    }
+}
+
 function showRoleFeatures(role) {
     const show = v => v ? 'block' : 'none';
     const isAdmin = role === 'superuser' || role === 'city';
     document.getElementById('userManagement').style.display = show(role === 'superuser');
-    document.getElementById('agronomistManagement').style.display = show(role === 'city');
+    document.getElementById('agronomistManagement').style.display = show(isAdmin);
+    // Il superuser sceglie il comune dal selettore e può inserire anche lo username.
+    const cityRow = document.getElementById('agroCityRow');
+    if (cityRow) cityRow.style.display = show(role === 'superuser');
+    const agroInput = document.getElementById('addAgronomistUsername');
+    if (agroInput) agroInput.placeholder = role === 'superuser'
+        ? 'Codice agronomo (AGR-XXXX-XXXX) o nome utente'
+        : 'Codice agronomo (AGR-XXXX-XXXX)';
     document.getElementById('cityManagement').style.display = show(role === 'superuser');
     const tabManage = document.getElementById('tabManageBtn');
     if (tabManage) tabManage.style.display = show(isAdmin);
@@ -624,10 +666,35 @@ async function resetPassword() {
 
 // ─── Agronomer management (city role) ────────────────────
 
+// Comune su cui opera il pannello Agronomi: implicito per `city`, scelto dal
+// selettore per `superuser` (null = nessun comune selezionato).
+function selectedCityUserId() {
+    if (state.user?.role !== 'superuser') return undefined;
+    const v = document.getElementById('agroCitySelect')?.value;
+    return v ? parseInt(v) : null;
+}
+
 async function loadAgronomists() {
-    const res = await fetch(`${API_BASE}/city/agronomers`, {headers: authHeader()});
+    const cityUserId = selectedCityUserId();
+    if (cityUserId === null) { renderAgronomistList([]); return; }
+    const q = cityUserId ? `?city_user_id=${cityUserId}` : '';
+    const res = await fetch(`${API_BASE}/city/agronomers${q}`, {headers: authHeader()});
     if (!res.ok) return;
     renderAgronomistList(await res.json());
+}
+
+// Riempie il selettore dei comuni (solo superuser) con gli account di ruolo `city`.
+function populateAgroCitySelect(users) {
+    const sel = document.getElementById('agroCitySelect');
+    if (!sel || state.user?.role !== 'superuser') return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— Seleziona il comune —</option>';
+    users.filter(u => u.role === 'city').forEach(u => {
+        const o = document.createElement('option');
+        o.value = u.id; o.textContent = `${u.username}${u.city ? ' · ' + u.city : ''}`;
+        sel.appendChild(o);
+    });
+    sel.value = prev;
 }
 
 function renderAgronomistList(agronomists) {
@@ -643,6 +710,7 @@ function renderAgronomistList(agronomists) {
         div.className = 'user-item';
         div.innerHTML = `<i class="fa-regular fa-user"></i>
             <span>${a.username}</span>
+            ${a.agronomer_code ? `<span style="font-size:12px;color:var(--text-muted);font-family:ui-monospace,monospace">${a.agronomer_code}</span>` : ''}
             ${a.email ? `<span style="font-size:12px;color:var(--text-muted)">(${a.email})</span>` : ''}
             <button class="btn btn-danger btn-sm" style="margin-left:auto;"
                 onclick="removeAgronomist(${a.membership_id})">
@@ -653,16 +721,22 @@ function renderAgronomistList(agronomists) {
 }
 
 async function addAgronomist() {
-    const username = document.getElementById('addAgronomistUsername').value.trim();
-    if (!username) return showStatus('Inserisci il nome utente dell\'Agronomo', 'warning');
+    const raw = document.getElementById('addAgronomistUsername').value.trim();
+    if (!raw) return showStatus('Inserisci il codice agronomo (AGR-XXXX-XXXX)', 'warning');
+    const cityUserId = selectedCityUserId();
+    if (cityUserId === null) return showStatus('Seleziona prima il comune', 'warning');
+    // Il superuser può digitare anche lo username; per il comune vale solo il codice.
+    const isCode  = /^AGR-/i.test(raw) || state.user?.role !== 'superuser';
+    const payload = isCode ? {code: raw.toUpperCase()} : {username: raw};
+    if (cityUserId) payload.city_user_id = cityUserId;
     const res  = await fetch(`${API_BASE}/city/agronomers`, {
         method: 'POST',
         headers: Object.assign({'Content-Type':'application/json'}, authHeader()),
-        body: JSON.stringify({username})
+        body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (res.ok) {
-        showStatus(`${username} aggiunto al comune`, 'success');
+        showStatus(`${data.username} aggiunto al comune`, 'success');
         document.getElementById('addAgronomistUsername').value = '';
         await loadAgronomists();
         await fetchTrees();
@@ -687,7 +761,7 @@ function switchTab(name) {
         b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab-section').forEach(s =>
         s.classList.toggle('active', s.id === 'tab-' + name));
-    if (name === 'manage' && state.user?.role === 'city') loadAgronomists();
+    if (name === 'manage' && (state.user?.role === 'city' || state.user?.role === 'superuser')) loadAgronomists();
     if (name === 'map') {
         if (!state.map) {
             state.map = L.map('map').setView([45.4642, 9.19], 12);
@@ -806,6 +880,57 @@ async function login() {
     }
 }
 
+// ─── Account (tutti i ruoli): email per il recupero password, cambio password ──
+
+const ROLE_LABELS = {superuser: 'superutente', city: 'comune', user: 'agronomo'};
+
+async function openAccount() {
+    ['pwCurrent','pwNew','pwNew2','accountEmail'].forEach(id => document.getElementById(id).value = '');
+    const u = state.user || {};
+    document.getElementById('accountInfo').innerHTML =
+        `<strong>${u.username || ''}</strong> · ${ROLE_LABELS[u.role] || u.role || ''}${u.city ? ' · ' + u.city : ''}` +
+        (u.agronomer_code ? ` · codice <span style="font-family:ui-monospace,monospace">${u.agronomer_code}</span>` : '');
+    document.getElementById('accountModal').classList.add('open');
+    try {
+        const res = await fetch(`${API_BASE}/me`, {headers: authHeader()});
+        if (res.ok) document.getElementById('accountEmail').value = (await res.json()).email || '';
+    } catch (_) { /* offline: il campo resta vuoto */ }
+}
+
+function closeAccount() {
+    document.getElementById('accountModal').classList.remove('open');
+}
+
+async function submitAccountEmail(e) {
+    e.preventDefault();
+    const email = document.getElementById('accountEmail').value.trim();
+    const res  = await fetch(`${API_BASE}/me`, {
+        method: 'PATCH',
+        headers: Object.assign({'Content-Type':'application/json'}, authHeader()),
+        body: JSON.stringify({email})
+    });
+    const data = await res.json();
+    if (res.ok) showStatus(data.message || 'Email aggiornata', 'success');
+    else showStatus(data.message || 'Errore nel salvataggio dell\'email', 'danger');
+}
+
+async function submitChangePassword(e) {
+    e.preventDefault();
+    const current = document.getElementById('pwCurrent').value;
+    const pw1     = document.getElementById('pwNew').value;
+    const pw2     = document.getElementById('pwNew2').value;
+    if (pw1.length < 6) return showStatus('Password troppo corta (minimo 6 caratteri)', 'warning');
+    if (pw1 !== pw2)    return showStatus('Le nuove password non coincidono', 'warning');
+    const res  = await fetch(`${API_BASE}/change-password`, {
+        method: 'POST',
+        headers: Object.assign({'Content-Type':'application/json'}, authHeader()),
+        body: JSON.stringify({current_password: current, new_password: pw1})
+    });
+    const data = await res.json();
+    if (res.ok) { closeAccount(); showStatus(data.message || 'Password aggiornata', 'success'); }
+    else showStatus(data.message || 'Errore nel cambio password', 'danger');
+}
+
 function logout() {
     state.token = null; state.user = null;
     localStorage.removeItem('token'); localStorage.removeItem('user');
@@ -911,15 +1036,16 @@ async function createCity() {
 async function createUser() {
     const username = document.getElementById('newUsername').value.trim();
     const password = document.getElementById('newPassword').value;
+    const email    = (document.getElementById('newEmail')?.value || '').trim() || null;
     const role     = document.getElementById('newRole').value;
     const city     = document.getElementById('newCity').value.trim() || null;
     const res  = await fetch(`${API_BASE}/add_user`, {
         method: 'POST',
         headers: Object.assign({'Content-Type':'application/json'}, authHeader()),
-        body: JSON.stringify({username, password, role, city})
+        body: JSON.stringify({username, password, email, role, city})
     });
     const data = await res.json();
-    if (res.ok) { showStatus('Utente creato: ' + username, 'success'); document.getElementById('newUsername').value = ''; document.getElementById('newPassword').value = ''; await populateUsers(); }
+    if (res.ok) { showStatus('Utente creato: ' + username, 'success'); ['newUsername','newPassword','newEmail'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; }); await populateUsers(); }
     else showStatus(data.message || 'Errore nella creazione utente', 'danger');
 }
 
@@ -935,9 +1061,47 @@ async function populateUsers() {
         div.className = 'user-item';
         div.innerHTML = `<i class="fa-regular fa-user"></i><span>${u.username}</span>
             ${u.city ? `<span style="font-size:12px;color:var(--text-muted)">(${u.city})</span>` : ''}
-            <span class="role-pill rp-${u.role}">${u.role}</span>`;
+            ${u.agronomer_code ? `<span style="font-size:12px;color:var(--text-muted);font-family:ui-monospace,monospace">${u.agronomer_code}</span>` : ''}
+            ${u.email ? `<span style="font-size:12px;color:var(--text-muted)"><i class="fa-regular fa-envelope" style="margin-right:3px;"></i>${u.email}</span>` : ''}
+            <span class="role-pill rp-${u.role}">${u.role}</span>
+            ${state.user?.role === 'superuser' ? `<button class="btn btn-outline btn-sm" style="margin-left:6px;" title="Modifica email / password"
+                onclick='openEditUser(${JSON.stringify(u)})'><i class="fa-solid fa-user-pen"></i></button>` : ''}`;
         list.appendChild(div);
     });
+    populateAgroCitySelect(users);
+}
+
+// ─── Modifica utente (solo superuser): email e reset password ──
+
+function openEditUser(u) {
+    document.getElementById('editUserId').value = u.id;
+    document.getElementById('editUserInfo').innerHTML =
+        `<strong>${u.username}</strong> · ${ROLE_LABELS[u.role] || u.role}${u.city ? ' · ' + u.city : ''}`;
+    document.getElementById('editUserEmail').value = u.email || '';
+    document.getElementById('editUserPassword').value = '';
+    document.getElementById('editUserModal').classList.add('open');
+}
+
+function closeEditUser() {
+    document.getElementById('editUserModal').classList.remove('open');
+}
+
+async function submitEditUser(e) {
+    e.preventDefault();
+    const id       = document.getElementById('editUserId').value;
+    const email    = document.getElementById('editUserEmail').value.trim();
+    const password = document.getElementById('editUserPassword').value;
+    if (password && password.length < 6) return showStatus('Password troppo corta (minimo 6 caratteri)', 'warning');
+    const payload = {email};
+    if (password) payload.password = password;
+    const res  = await fetch(`${API_BASE}/admin/users/${id}`, {
+        method: 'PATCH',
+        headers: Object.assign({'Content-Type':'application/json'}, authHeader()),
+        body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) { closeEditUser(); showStatus(data.message || 'Utente aggiornato', 'success'); await populateUsers(); }
+    else showStatus(data.message || 'Errore nell\'aggiornamento', 'danger');
 }
 
 // ─── Trees: fetch ─────────────────────────────────────────
@@ -2723,6 +2887,7 @@ function showStatus(msg, level='info') {
 
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('loginBtn').addEventListener('click', login);
+    document.getElementById('agroCodeBadge').addEventListener('click', copyAgronomerCode);
     document.getElementById('loginPassword').addEventListener('keydown', e => e.key==='Enter' && login());
     // Registrazione pubblica disabilitata: link "Crea account" nascosto (vedi index.html).
     // Riattivare questa riga quando si riapre la registrazione.

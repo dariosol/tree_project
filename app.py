@@ -78,6 +78,17 @@ geolocator = Nominatim(user_agent="tree_locator")
 # -----------------------
 # Models
 # -----------------------
+# Alfabeto senza caratteri ambigui (0/O, 1/I/L) per un codice facile da dettare.
+_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+def _new_agronomer_code():
+    """Genera un codice agronomo univoco nel formato ``AGR-XXXX-XXXX``."""
+    while True:
+        raw  = ''.join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
+        code = f'AGR-{raw[:4]}-{raw[4:]}'
+        if not User.query.filter_by(agronomer_code=code).first():
+            return code
+
 class User(db.Model):
     __tablename__ = 'user'
     id                     = db.Column(db.Integer, primary_key=True)
@@ -88,9 +99,21 @@ class User(db.Model):
     city                   = db.Column(db.String(100), nullable=True)
     password_reset_token   = db.Column(db.String(100), nullable=True)
     password_reset_expires = db.Column(db.DateTime(timezone=True), nullable=True)
+    # Codice identificativo dell'agronomo (ruolo `user`): generato una volta
+    # sola e mai più cambiato. L'agronomo lo comunica al comune, che lo usa per
+    # collegarlo (vedi /city/agronomers).
+    agronomer_code         = db.Column(db.String(20), unique=True, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
+
+    def ensure_agronomer_code(self):
+        """Assegna il codice agronomo se manca (solo ruolo `user`). Ritorna il codice."""
+        if self.role != 'user':
+            return None
+        if not self.agronomer_code:
+            self.agronomer_code = _new_agronomer_code()
+        return self.agronomer_code
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -278,12 +301,19 @@ with app.app_context():
         ('email', 'VARCHAR(120)'),
         ('password_reset_token', 'VARCHAR(100)'),
         ('password_reset_expires', 'TIMESTAMPTZ'),
+        ('agronomer_code', 'VARCHAR(20)'),
     ]
     with db.engine.connect() as conn:
         for col_name, col_type in user_new_cols:
             if col_name not in existing_user_cols:
                 conn.execute(text(f'ALTER TABLE "user" ADD COLUMN {col_name} {col_type}'))
+        # Indice univoco separato: SQLite non accetta UNIQUE in ADD COLUMN.
+        conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS uq_user_agronomer_code ON "user" (agronomer_code)'))
         conn.commit()
+    # Backfill: gli agronomi esistenti ricevono il codice (una volta sola).
+    for u in User.query.filter_by(role='user', agronomer_code=None).all():
+        u.ensure_agronomer_code()
+    db.session.commit()
     with db.engine.connect() as conn:
         try:
             conn.execute(text('ALTER TABLE tree DROP CONSTRAINT uq_tree_custom_id_city'))
@@ -549,6 +579,7 @@ def _ensure_demo_account(username, password, role):
     u.set_password(password)
     u.role = role
     u.city = DEMO_CITY_NAME
+    u.ensure_agronomer_code()
     db.session.commit()
     return u
 
@@ -654,18 +685,56 @@ def login():
     # Demo accounts: reset the shared sandbox to the fixed demo state on every login.
     if user.username in (DEMO_USERNAME, DEMO_CITY_USERNAME):
         reset_demo()
+    if user.role == 'user' and not user.agronomer_code:
+        user.ensure_agronomer_code(); db.session.commit()
     token = generate_token(user)
     return jsonify({'token': token,
                     'user': {'id': user.id, 'username': user.username,
-                             'role': user.role, 'city': user.city}})
+                             'role': user.role, 'city': user.city,
+                             'agronomer_code': user.agronomer_code}})
 
 @app.route('/me', methods=['GET'])
 @auth_required
 def me():
+    user = db.session.get(User, request.user.get('user_id'))
+    code = None
+    if user and user.role == 'user':
+        code = user.ensure_agronomer_code()
+        db.session.commit()
     return jsonify({'user_id': request.user.get('user_id'),
                     'username': request.user.get('username'),
                     'role': request.user.get('role'),
-                    'city': request.user.get('city')})
+                    'city': request.user.get('city'),
+                    'email': (user.email if user else None) or '',
+                    'agronomer_code': code})
+
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+@app.route('/me', methods=['PATCH'])
+@auth_required
+def update_me():
+    """Aggiorna i dati del proprio account. Per ora solo l'email, che serve
+    al recupero password (/forgot-password) — utile ai comuni creati dal
+    superuser senza email. Stringa vuota = rimuove l'email."""
+    if _is_demo_account(request.user.get('username')):
+        return jsonify({'message': 'Azione non disponibile nell\'account demo'}), 403
+    user = db.session.get(User, request.user.get('user_id'))
+    if not user:
+        return jsonify({'message': 'Utente non trovato'}), 404
+    data = request.json or {}
+    if 'email' not in data:
+        return jsonify({'message': 'Nessun campo da aggiornare'}), 400
+    email = (data.get('email') or '').strip().lower()
+    if email:
+        if not _EMAIL_RE.match(email):
+            return jsonify({'message': 'Indirizzo email non valido'}), 400
+        other = User.query.filter(User.email == email, User.id != user.id).first()
+        if other:
+            return jsonify({'message': 'Email già associata a un altro account'}), 409
+    user.email = email or None
+    db.session.commit()
+    return jsonify({'message': 'Email aggiornata' if email else 'Email rimossa',
+                    'email': user.email or ''}), 200
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -685,6 +754,7 @@ def register():
         return jsonify({'message': 'Email già registrata'}), 400
     user = User(username=username, email=email or None, role='user', city=None)
     user.set_password(password)
+    user.ensure_agronomer_code()
     db.session.add(user)
     db.session.commit()
     token = generate_token(user)
@@ -757,6 +827,31 @@ def reset_password():
     db.session.commit()
     return jsonify({'message': 'Password aggiornata con successo'}), 200
 
+@app.route('/change-password', methods=['POST'])
+@auth_required
+def change_password():
+    """Cambio password dell'utente loggato (tutti i ruoli): serve la password
+    attuale. Pensato per il primo accesso del comune con password temporanea."""
+    if _is_demo_account(request.user.get('username')):
+        return jsonify({'message': 'Azione non disponibile nell\'account demo'}), 403
+    data         = request.json or {}
+    current      = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+    if not current or not new_password:
+        return jsonify({'message': 'Password attuale e nuova password obbligatorie'}), 400
+    if len(new_password) < 6:
+        return jsonify({'message': 'Password troppo corta (minimo 6 caratteri)'}), 400
+    if new_password == current:
+        return jsonify({'message': 'La nuova password deve essere diversa da quella attuale'}), 400
+    user = db.session.get(User, request.user.get('user_id'))
+    if not user or not user.check_password(current):
+        return jsonify({'message': 'Password attuale non corretta'}), 401
+    user.set_password(new_password)
+    user.password_reset_token   = None
+    user.password_reset_expires = None
+    db.session.commit()
+    return jsonify({'message': 'Password aggiornata con successo'}), 200
+
 # -----------------------
 # User management
 # -----------------------
@@ -778,12 +873,58 @@ def add_user():
         city = creator.get('city')
     if User.query.filter_by(username=username).first():
         return jsonify({'message': 'Username already exists'}), 400
-    new_user = User(username=username, role=role, city=city)
+    email = (data.get('email') or '').strip().lower() or None
+    if email:
+        if not _EMAIL_RE.match(email):
+            return jsonify({'message': 'Indirizzo email non valido'}), 400
+        if User.query.filter_by(email=email).first():
+            return jsonify({'message': 'Email già associata a un altro account'}), 409
+    new_user = User(username=username, email=email, role=role, city=city)
     new_user.set_password(password)
+    new_user.ensure_agronomer_code()
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'message': 'User created',
-                    'user': {'id': new_user.id, 'username': username, 'role': role, 'city': city}}), 201
+                    'user': {'id': new_user.id, 'username': username, 'role': role, 'city': city,
+                             'email': new_user.email or '',
+                             'agronomer_code': new_user.agronomer_code}}), 201
+
+@app.route('/admin/users/<int:target_id>', methods=['PATCH'])
+@auth_required
+@role_required('superuser')
+def admin_update_user(target_id):
+    """Il superuser aggiorna email e/o password di un utente (assistenza:
+    utente senza email o che non riesce più ad accedere). Campi opzionali:
+    ``email`` (stringa vuota = rimuove) e ``password`` (nuova password)."""
+    target = db.session.get(User, target_id)
+    if not target:
+        return jsonify({'message': 'Utente non trovato'}), 404
+    if _is_demo_account(target.username):
+        return jsonify({'message': 'Gli account demo non sono modificabili'}), 403
+    data = request.json or {}
+    if 'email' not in data and not data.get('password'):
+        return jsonify({'message': 'Nessun campo da aggiornare'}), 400
+    changed = []
+    if 'email' in data:
+        email = (data.get('email') or '').strip().lower()
+        if email:
+            if not _EMAIL_RE.match(email):
+                return jsonify({'message': 'Indirizzo email non valido'}), 400
+            if User.query.filter(User.email == email, User.id != target.id).first():
+                return jsonify({'message': 'Email già associata a un altro account'}), 409
+        target.email = email or None
+        changed.append('email')
+    if data.get('password'):
+        if len(data['password']) < 6:
+            return jsonify({'message': 'Password troppo corta (minimo 6 caratteri)'}), 400
+        target.set_password(data['password'])
+        target.password_reset_token   = None
+        target.password_reset_expires = None
+        changed.append('password')
+    db.session.commit()
+    return jsonify({'message': f'Aggiornato: {", ".join(changed)}',
+                    'user': {'id': target.id, 'username': target.username, 'role': target.role,
+                             'city': target.city, 'email': target.email or ''}}), 200
 
 @app.route('/users', methods=['GET'])
 @auth_required
@@ -792,7 +933,10 @@ def list_users():
     if role == 'superuser':   users = User.query.all()
     elif role == 'city':      users = User.query.filter_by(city=user_city).all()
     else:                     users = User.query.filter_by(id=user_id).all()
-    return jsonify([{'id': u.id, 'username': u.username, 'role': u.role, 'city': u.city} for u in users])
+    return jsonify([{'id': u.id, 'username': u.username, 'role': u.role, 'city': u.city,
+                     'email': u.email or '',
+                     'agronomer_code': u.agronomer_code if role == 'superuser' else None}
+                    for u in users])
 
 # -----------------------
 # City ↔ Agronomer membership
@@ -810,7 +954,8 @@ def list_city_agronomers():
         a = db.session.get(User, m.agronomer_id)
         if a:
             result.append({'membership_id': m.id, 'agronomer_id': a.id,
-                           'username': a.username, 'email': a.email or ''})
+                           'username': a.username, 'email': a.email or '',
+                           'agronomer_code': a.agronomer_code})
     return jsonify(result)
 
 @app.route('/city/agronomers', methods=['POST'])
@@ -822,12 +967,22 @@ def add_city_agronomer():
     user_id = request.user.get('user_id')
     role    = request.user.get('role')
     data    = request.json or {}
-    username = data.get('username', '').strip()
-    if not username:
-        return jsonify({'message': 'username obbligatorio'}), 400
-    agronomer = User.query.filter_by(username=username, role='user').first()
-    if not agronomer:
-        return jsonify({'message': f'Agronomo "{username}" non trovato'}), 404
+    # Il comune collega l'agronomo tramite il suo codice (AGR-XXXX-XXXX);
+    # il superuser può usare anche lo username, per l'associazione manuale.
+    code     = (data.get('code') or '').strip().upper()
+    username = (data.get('username') or '').strip()
+    if code:
+        agronomer = User.query.filter_by(agronomer_code=code, role='user').first()
+        if not agronomer:
+            return jsonify({'message': f'Nessun agronomo con codice "{code}"'}), 404
+    elif username and role == 'superuser':
+        agronomer = User.query.filter_by(username=username, role='user').first()
+        if not agronomer:
+            return jsonify({'message': f'Agronomo "{username}" non trovato'}), 404
+    elif username:
+        return jsonify({'message': 'Inserisci il codice agronomo (AGR-XXXX-XXXX) comunicato dall\'agronomo'}), 400
+    else:
+        return jsonify({'message': 'Codice agronomo obbligatorio'}), 400
     city_user_id = user_id if role == 'city' else int(data.get('city_user_id', user_id))
     if CityMembership.query.filter_by(city_user_id=city_user_id, agronomer_id=agronomer.id).first():
         return jsonify({'message': 'Agronomo già collegato a questo comune'}), 409
