@@ -12,9 +12,10 @@ Applicazione web per il censimento e la valutazione del rischio degli alberi urb
 - **Valutazione del rischio ORD** secondo il protocollo ARETE: prodotto di Bersaglio (B), Inclinazione (I) e Probabilità (P)
 - **Calcolo automatico del bersaglio** da tipo di uso del suolo e flusso (pedoni, traffico, proprietà, occupazione)
 - **Valore ecologico**: stima di biomassa, CO₂ sequestrata, O₂ prodotto, intercettazione acqua e valore monetario (€)
-- **Mappa interattiva** (Leaflet) con clustering e marker colorati per classe di rischio
-- **Esportazione** in formato Excel (.xlsx) e GeoPackage (.gpkg)
-- **Report "schede albero"** da template selezionabile — una scheda per albero *(placeholder, in sviluppo)*
+- **Mappa interattiva** (Leaflet) con clustering, marker colorati per classe di rischio, ID albero nel popup e **selezione per area** (poligono disegnato sulla mappa) per esportare o generare le schede degli alberi inclusi
+- **Esportazione** in formato Excel (.xlsx) e GeoPackage (.gpkg), con scelta dei campi da esportare
+- **Schede di rilevamento ARETE** (foglio ORD): una scheda per albero generata dal **template ufficiale** `Schede_Rilevamento_ARETE_DEMO_ver.2.0.xlsm`, compilata coi dati del database e restituita in uno .zip con le cartelle `excel/` (.xlsx) e `pdf/` (se LibreOffice è disponibile sul server)
+- **Triage TRG-P** (popolamenti arborei): calcolatore di screening rapido con categoria di intervento 1–6 e valore ornamentale ([`tools/trg_p_calculator.py`](tools/trg_p_calculator.py)) — *modulo di calcolo pronto, non ancora esposto nell'interfaccia/API*
 - **Importazione** da file GeoPackage (.gpkg) — compatibile con i censimenti ARETE e con i file esportati dall'app, con anteprima e mappatura colonne
 - **Input vocale** per la compilazione delle schede (Web Speech API + parsing dell'intento tramite Groq)
 - **Geocodifica** diretta e inversa degli indirizzi (Nominatim/OpenStreetMap) e autocompletamento dei comuni italiani
@@ -53,16 +54,19 @@ La larghezza della zona è calcolata automaticamente:
 
 Un **moltiplicatore** opzionale (es. 2 per zone scolastiche) scala la classe bersaglio finale.
 
-La logica di calcolo è implementata in [`tools/ord_calculator.py`](tools/ord_calculator.py), con le tabelle di lookup e i valori dei menu a tendina in [`tools/lookup_tables.py`](tools/lookup_tables.py) e [`tools/dropdowns_ord.py`](tools/dropdowns_ord.py).
+La logica di calcolo è implementata in [`tools/ord_calculator.py`](tools/ord_calculator.py), con le tabelle di lookup e i valori dei menu a tendina in [`tools/lookup_tables.py`](tools/lookup_tables.py) e [`tools/dropdowns_ord.py`](tools/dropdowns_ord.py). Il calcolo è allineato al foglio ORD della scheda ufficiale ARETE (vedi [Schede di rilevamento](#schede-di-rilevamento-arete)).
+
+Il **triage TRG-P** (screening rapido per popolamenti arborei, foglio 2 del modulo ARETE) è implementato in [`tools/trg_p_calculator.py`](tools/trg_p_calculator.py) e [`tools/dropdowns_trg_p.py`](tools/dropdowns_trg_p.py): stessa matrice di rischio B·I·P, ma con classe di pericolo qualitativa, valutazione singola (senza rischio residuo), categoria di intervento 1–6 e stima del valore ornamentale. Il modulo è utilizzabile da Python ma non è ancora collegato a endpoint o tab della webapp.
 
 ---
 
 ## Stack tecnologico
 
-- **Backend**: Python 3.10+, Flask 3.1, SQLAlchemy 2.0, psycopg2-binary
+- **Backend**: Python 3.12 (vedi `.python-version`), Flask 3.1, SQLAlchemy 2.0, psycopg2-binary
 - **Database**: PostgreSQL (le coordinate sono memorizzate come `latitude`/`longitude` numeriche; **PostGIS non è richiesto**)
 - **Frontend**: HTML5, CSS3, JavaScript vanilla, Leaflet.js, Font Awesome
 - **Autenticazione**: JWT (PyJWT), password hash con `werkzeug.security`
+- **Export/Schede**: openpyxl (Excel e scheda ARETE), Pillow (loghi nella scheda), LibreOffice *(opzionale, per la conversione in PDF)*
 - **Geocodifica**: geopy + Nominatim (OpenStreetMap)
 - **Input vocale**: Web Speech API (browser) + Groq (`llama-3.1-8b-instant`) per il riconoscimento dell'intento
 - **Email**: SMTP (Gmail) per il reset password
@@ -77,15 +81,24 @@ tree_project/
 ├── app.py                      # Backend Flask: API, modelli, autenticazione, import/export
 ├── tools/
 │   ├── ord_calculator.py       # Logica calcolo ARETE (B·I·P, bersaglio, classi, valore ecologico)
+│   ├── ord_scheda.py           # Compila la scheda ARETE (foglio ORD) dal template .xlsm → .xlsx/.pdf
+│   ├── trg_p_calculator.py     # Calcolatore triage TRG-P (popolamenti arborei)
 │   ├── lookup_tables.py        # Tabelle di lookup (specie, patologie, prescrizioni, ...)
 │   ├── dropdowns_ord.py        # Valori dei menu a tendina ORD
-│   └── report_templates.py     # Template schede albero per i report (placeholder)
+│   ├── dropdowns_trg_p.py      # Valori dei menu a tendina TRG-P
+│   └── report_templates.py     # Registro dei template di scheda (ARETE .xlsx, base HTML)
+├── Schede_Rilevamento_ARETE/
+│   └── Schede_Rilevamento_ARETE_DEMO_ver.2.0.xlsm   # Template ufficiale della scheda
 ├── frontend/
 │   ├── index.html              # Interfaccia principale (multi-tab)
 │   ├── app.js                  # Logica frontend (fetch, mappa, form, esportazione)
 │   ├── voice.js                # Input vocale (Web Speech API + intent Groq)
-│   └── style.css               # Stili dell'applicazione
+│   ├── style.css               # Stili dell'applicazione
+│   └── images/                 # Loghi (usati anche nella scheda ARETE)
+├── test_locale.py              # Avvio rapido in locale (anche con SQLite, senza PostgreSQL)
+├── test_flask_api.py           # Test dell'API
 ├── Procfile                    # Configurazione Gunicorn per Railway
+├── .python-version             # Versione Python per Railway (3.12)
 ├── requirements.txt            # Dipendenze Python
 ├── .env                        # Variabili d'ambiente locali (non in git)
 ├── .env.example                # Template variabili d'ambiente
@@ -98,8 +111,9 @@ tree_project/
 
 ### Prerequisiti
 
-- Python ≥ 3.10
+- Python 3.12 (consigliato; ≥ 3.10 funziona in locale)
 - PostgreSQL
+- *(opzionale)* LibreOffice (`libreoffice-calc`) per ottenere anche i PDF delle schede ARETE
 
 ### 1. Clona il repository
 
@@ -175,6 +189,18 @@ L'app è disponibile su: `http://127.0.0.1:5000`
 
 > **Nota**: il warning *"Do not use the development server in a production environment"* è normale durante lo sviluppo locale.
 
+### Avvio rapido senza PostgreSQL
+
+Per provare l'interfaccia senza configurare un database, `test_locale.py` avvia l'app su un file SQLite locale (`test_locale.db`, ignorato da git) e apre il browser:
+
+```bash
+python test_locale.py --sqlite            # zero-setup, DB SQLite locale
+python test_locale.py --port 8000         # porta diversa
+python test_locale.py --no-browser        # non aprire il browser
+```
+
+Senza `--sqlite` usa `DATABASE_URL` (PostgreSQL) come `app.py`.
+
 ---
 
 ## Ruoli utente
@@ -232,7 +258,11 @@ Nel servizio dell'app, imposta le variabili:
 | `REGISTRATION_ENABLED` | *(opzionale)* `true` per riabilitare la registrazione pubblica (default `false`) |
 | `DEMO_*` | *(opzionale)* Credenziali degli account demo (vedi sezione [Account demo](#account-demo)) |
 
+| `SCHEDA_WORK_DIR` | *(opzionale)* Cartella di lavoro temporanea per la generazione delle schede (default `.scheda_work/` nel progetto) |
+
 > Railway usa `postgres://` come prefisso — l'app lo converte automaticamente in `postgresql://`.
+
+> **PDF delle schede su Railway**: l'immagine di default di Railway **non include LibreOffice**, quindi lo .zip delle schede contiene solo la cartella `excel/` (la cartella `pdf/` resta vuota). Per avere anche i PDF serve un'immagine con LibreOffice (es. un `Dockerfile` custom o una configurazione Nixpacks che installi `libreoffice`); l'app rileva `libreoffice`/`soffice` nel `PATH` automaticamente.
 
 ### 3. Deploy
 
@@ -249,11 +279,32 @@ web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --preload
 | Tab | Contenuto |
 |-----|-----------|
 | **Alberi** | Tabella degli alberi con ricerca, ordinamento, aggiunta/modifica/cancellazione |
-| **Mappa** | Mappa Leaflet con marker e clustering, filtri per città |
+| **Mappa** | Mappa Leaflet con marker e clustering, filtri per città, ID albero nel popup e **selezione per area**: si disegna un poligono sulla mappa e si esportano/generano le schede degli alberi contenuti |
 | **Gestione** | Pannello amministratore: gestione utenti, città, agronomi, reset password |
-| **Esporta** | Esportazione in Excel (.xlsx) o GeoPackage (.gpkg) e report schede albero — intera raccolta o selezione manuale, con **scelta dei campi da esportare** (esclusione singoli campi) |
+| **Esporta** | Esportazione in Excel (.xlsx) o GeoPackage (.gpkg) e **schede ARETE** — intera raccolta o selezione manuale, con **scelta dei campi da esportare** (esclusione singoli campi) |
 | **Importa** | Importazione da file .gpkg (censimenti esterni o file esportati dall'app) con anteprima, mappatura colonne e gestione conflitti (skip/update) |
 | **Algoritmo** | Documentazione tecnica del calcolo ARETE integrata nella webapp |
+
+---
+
+## Schede di rilevamento ARETE
+
+La generazione delle schede **non reimpagina** i dati: parte dal template ufficiale [`Schede_Rilevamento_ARETE/Schede_Rilevamento_ARETE_DEMO_ver.2.0.xlsm`](Schede_Rilevamento_ARETE/) (foglio **ORD**) e scrive i valori del database nelle celle corrispondenti. Layout, etichette, celle unite e stili restano identici all'originale.
+
+- **Niente macro**: l'output è `.xlsx`, il VBA viene scartato.
+- **Valori, non formule**: dove il DB ha già il risultato calcolato (es. il rischio) viene scritto come valore.
+- **Loghi**: i loghi in `frontend/images/` vengono inseriti nella scheda (richiede Pillow).
+- **Output**: uno `.zip` (`schede_albero.zip`) con `excel/` (un `.xlsx` per albero, nome basato sull'ID personalizzato) e `pdf/` (i PDF corrispondenti, convertiti con LibreOffice in un'unica invocazione headless). Se LibreOffice non è installato, `pdf/` resta vuota.
+- La mappa campo→cella è `CELL_MAP` in [`tools/ord_scheda.py`](tools/ord_scheda.py): è il punto da modificare se un valore deve finire in una cella diversa.
+
+I template disponibili sono registrati in [`tools/report_templates.py`](tools/report_templates.py):
+
+| ID | Nome | Formato |
+|----|------|---------|
+| `scheda_arete` *(default)* | Scheda di rilevamento ARETE (ORD) | .zip con .xlsx (+ .pdf) |
+| `scheda_base` | Scheda albero (base HTML) | HTML segnaposto, una pagina per albero |
+
+Le schede si generano dal tab **Esporta** (tutti gli alberi visibili o selezione manuale) oppure dalla **Mappa** tramite la selezione per area.
 
 ---
 
@@ -340,14 +391,14 @@ Valori già in forma testuale (es. file esportati da Silvae Pro) vengono lasciat
 | `POST` | `/import/gpkg/inspect` | Anteprima colonne e mappatura automatica di un .gpkg |
 | `POST` | `/import/gpkg` | Importa alberi da .gpkg (multipart: `file`, `city`, `on_conflict=skip\|update`) |
 
-### Report — Schede albero *(placeholder)*
+### Report — Schede albero
 
-Generazione di un report con una **scheda per albero** a partire da un *template* selezionabile. La struttura è già cablata (filtro per ruolo e selezione `ids` come gli export); resa attuale segnaposto in attesa dei requisiti definitivi (vedi [`tools/report_templates.py`](tools/report_templates.py)).
+Stesso filtro per ruolo e stessa selezione `ids` degli export (vedi [Schede di rilevamento ARETE](#schede-di-rilevamento-arete)).
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | `GET`  | `/report/templates` | Elenco dei template di scheda disponibili |
-| `GET`  | `/report/scheda` | Genera le schede albero (`?ids=` e `?template=` opzionali) |
+| `GET`  | `/report/scheda` | Genera le schede albero (`?ids=` e `?template=` opzionali; default `scheda_arete` → `schede_albero.zip`) |
 
 ### Geocodifica e voce
 
@@ -377,6 +428,12 @@ Imposta la variabile d'ambiente `GROQ_API_KEY`.
 
 **L'app su Railway non si avvia**
 Controlla che la variabile `DATABASE_URL` sia impostata correttamente.
+
+**Lo .zip delle schede non contiene i PDF (cartella `pdf/` vuota)**
+LibreOffice non è disponibile sul server. In locale: `sudo apt install libreoffice-calc`. Su Railway l'immagine di default non lo include: serve un `Dockerfile`/configurazione Nixpacks che installi `libreoffice` (vedi [Deploy su Railway](#deploy-su-railway)). Gli `.xlsx` in `excel/` vengono comunque generati.
+
+**I loghi non compaiono nella scheda ARETE**
+Verifica che `Pillow` sia installato (`pip install Pillow`) e che le immagini siano presenti in `frontend/images/`.
 
 ---
 
